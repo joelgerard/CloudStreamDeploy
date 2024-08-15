@@ -1,0 +1,5 @@
+steps:
+- name: 'gcr.io/cloud-builders/docker'  
+  args: ['pull', 'us-west1-docker.pkg.dev/cloud-stream-431915/cloud-run-source-deploy/cloudstreamdeploy/cloudstreamproxy']
+- name: 'gcr.io/cloud-builders/docker'
+  args: ['run', '--platform=linux/amd64', '--image', 'us-west1-docker.pkg.dev/cloud-stream-431915/cloud-run-source-deploy/cloudstreamdeploy/cloudstreamproxy', '--ports=8080,1935']
