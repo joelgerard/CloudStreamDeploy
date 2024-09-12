@@ -1,0 +1,14 @@
+# in /etc/systemd/system
+
+[Unit]
+Description=CloudStream service
+After=network.target
+
+[Service]
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/home/ubuntu/dev/git/cloudstream/server
+ExecStart=/usr/bin/gunicorn --workers 3 --bind unix:/home/ubuntu/dev/git/cloudstream/server/app.sock wsgi:app
+
+[Install]
+WantedBy=multi-user.target
