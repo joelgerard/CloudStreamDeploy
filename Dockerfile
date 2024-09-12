@@ -1,64 +1,61 @@
-FROM buildpack-deps:bullseye
+FROM nvidia/cuda:12.6.1-cudnn-devel-ubuntu24.04
 
-LABEL maintainer="Sebastian Ramirez <tiangolo@gmail.com>"
+# FROM ubuntu:22.04 as base
+# RUN apt update -q && apt install -y ca-certificates wget && \
+#     wget -qO /cuda-keyring.deb https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/cuda-keyring_1.1-1_all.deb && \
+#     dpkg -i /cuda-keyring.deb && apt update -q
 
-# Versions of Nginx and nginx-rtmp-module to use
-ENV NGINX_VERSION nginx-1.23.2
-ENV NGINX_RTMP_MODULE_VERSION 1.2.2
+# FROM base as builder
+# RUN apt install -y --no-install-recommends git cuda-nvcc-12-2
+# RUN git clone --depth=1 https://github.com/nvidia/cuda-samples.git /cuda-samples
+# RUN cd /cuda-samples/Samples/1_Utilities/deviceQuery && \
+#     make && install -m 755 deviceQuery /usr/local/bin
 
-# Install dependencies
-RUN apt-get update && \
-    apt-get install -y ca-certificates openssl libssl-dev && \
-    rm -rf /var/lib/apt/lists/*
 
-# Download and decompress Nginx
-RUN mkdir -p /tmp/build/nginx && \
-    cd /tmp/build/nginx && \
-    wget -O ${NGINX_VERSION}.tar.gz https://nginx.org/download/${NGINX_VERSION}.tar.gz && \
-    tar -zxf ${NGINX_VERSION}.tar.gz
 
-# Download and decompress RTMP module
-RUN mkdir -p /tmp/build/nginx-rtmp-module && \
-    cd /tmp/build/nginx-rtmp-module && \
-    wget -O nginx-rtmp-module-${NGINX_RTMP_MODULE_VERSION}.tar.gz https://github.com/arut/nginx-rtmp-module/archive/v${NGINX_RTMP_MODULE_VERSION}.tar.gz && \
-    tar -zxf nginx-rtmp-module-${NGINX_RTMP_MODULE_VERSION}.tar.gz && \
-    cd nginx-rtmp-module-${NGINX_RTMP_MODULE_VERSION}
 
-# Build and install Nginx
-# The default puts everything under /usr/local/nginx, so it's needed to change
-# it explicitly. Not just for order but to have it in the PATH
-RUN cd /tmp/build/nginx/${NGINX_VERSION} && \
-    ./configure \
-        --sbin-path=/usr/local/sbin/nginx \
-        --conf-path=/etc/nginx/nginx.conf \
-        --error-log-path=/var/log/nginx/error.log \
-        --pid-path=/var/run/nginx/nginx.pid \
-        --lock-path=/var/lock/nginx/nginx.lock \
-        --http-log-path=/var/log/nginx/access.log \
-        --http-client-body-temp-path=/tmp/nginx-client-body \
-        --with-http_ssl_module \
-        --with-threads \
-        --with-ipv6 \
-        --add-module=/tmp/build/nginx-rtmp-module/nginx-rtmp-module-${NGINX_RTMP_MODULE_VERSION} --with-debug && \
-    make -j $(getconf _NPROCESSORS_ONLN) && \
-    make install && \
-    mkdir /var/lock/nginx && \
-    rm -rf /tmp/build
+# FROM base as runtime
+# #RUN apt install -y --no-install-recommends libcudnn8 libcublas-12-2
+# COPY --from=builder /usr/local/bin/deviceQuery /usr/local/bin/deviceQuery
 
-# Forward logs to Docker
-RUN ln -sf /dev/stdout /var/log/nginx/access.log && \
-    ln -sf /dev/stderr /var/log/nginx/error.log
+RUN apt update
+RUN apt install -y build-essential yasm cmake libtool libc6 libc6-dev unzip wget libnuma1 libnuma-dev git-all
 
-# Set up config file
-COPY nginx.conf /etc/nginx/nginx.conf
+RUN mkdir /src
+WORKDIR /src
+RUN git clone https://git.videolan.org/git/ffmpeg/nv-codec-headers.git
+WORKDIR /src/nv-codec-headers
+RUN make install
+WORKDIR /src
+RUN git clone https://github.com/joelgerard/FFmpeg.git
+WORKDIR /src/FFmpeg
+RUN ./configure --enable-nonfree --enable-cuda-nvcc --enable-libnpp --extra-cflags=-I/usr/local/cuda/include --extra-ldflags=-L/usr/local/cuda/lib64 --disable-static --enable-shared
+RUN make -j 8
+RUN make install
+# TODO: I seem to recall we needed the basic version of this not the secure one?
+RUN cp /usr/local/bin/ffmpeg /usr/bin/ffmpeg
+RUN cp /usr/local/bin/ffmpeg /usr/bin/ffmpeg_secure
 
-EXPOSE 1935 8080
-CMD ["nginx", "-g", "daemon off;"]
+RUN apt install -y python3-pip
+RUN mkdir /web
+WORKDIR /web
+RUN git clone https://github.com/joelgerard/CloudStreamDeploy.git
+WORKDIR /web/CloudStreamDeploy
+RUN cp -r deploy/* ..
+WORKDIR /web
+RUN pip install --break-system-packages -r requirements.txt
+RUN pip install --break-system-packages gunicorn    
 
-# FROM nginx:alpine
+# RUN mkdir /docker
+# COPY docker /docker
 
-# COPY nginx.conf /etc/nginx/nginx.conf
+RUN apt install -y curl
+RUN curl -L https://fly.io/install.sh | sh
 
-# EXPOSE 8080
 
-# CMD ["nginx", "-g", "daemon off;"]
+
+
+
+# CMD ["sleep", "inf"]
+CMD ["gunicorn","-w","10", "--bind", "0.0.0.0:8000", "wsgi:app"]
+# CMD ["bash","touch","test"]
